@@ -1,0 +1,236 @@
+#!/usr/bin/env bash
+#
+# rom-cli — browse and download legal ROMs, homebrew and public-domain
+#           games from the Internet Archive, ani-cli style.
+#
+# Dependencies: curl, jq, fzf, aria2 (aria2c)
+# License: GPL-3.0
+#
+# This tool ONLY queries the public Internet Archive API. It does not
+# scrape, bypass, or access any copyrighted/commercial ROM sources.
+
+set -euo pipefail
+
+VERSION="1.0.0"
+
+# ----------------------------------------------------------------------------
+# Config
+# ----------------------------------------------------------------------------
+: "${ROM_CLI_DOWNLOAD_DIR:=${XDG_DOWNLOAD_DIR:-$HOME/Downloads}/roms}"
+: "${ROM_CLI_CONNECTIONS:=8}"          # parallel connections per download (aria2 -x)
+: "${ROM_CLI_RESULTS:=50}"             # number of search results to fetch
+
+IA_ADVANCED="https://archive.org/advancedsearch.php"
+IA_META="https://archive.org/metadata"
+IA_DL="https://archive.org/download"
+
+# Collections that are safe / legal: homebrew, public domain, openly-licensed.
+# These are the buckets rom-cli searches within. Add your own via -c.
+: "${ROM_CLI_COLLECTIONS:=open_source_software;softwarelibrary_misc;homebrew}"
+
+# ----------------------------------------------------------------------------
+# Pretty output
+# ----------------------------------------------------------------------------
+c_reset=$'\e[0m'; c_dim=$'\e[2m'; c_grn=$'\e[32m'; c_blu=$'\e[34m'; c_red=$'\e[31m'; c_yel=$'\e[33m'
+msg()  { printf '%s>>%s %s\n' "$c_grn" "$c_reset" "$*"; }
+info() { printf '%s::%s %s\n' "$c_blu" "$c_reset" "$*"; }
+warn() { printf '%s!!%s %s\n' "$c_yel" "$c_reset" "$*" >&2; }
+die()  { printf '%serror:%s %s\n' "$c_red" "$c_reset" "$*" >&2; exit 1; }
+
+# ----------------------------------------------------------------------------
+# Dependency check
+# ----------------------------------------------------------------------------
+check_deps() {
+    local missing=()
+    for dep in curl jq fzf aria2c; do
+        command -v "$dep" >/dev/null 2>&1 || missing+=("$dep")
+    done
+    if ((${#missing[@]})); then
+        die "missing dependencies: ${missing[*]}  (install via: sudo pacman -S ${missing[*]/aria2c/aria2})"
+    fi
+}
+
+# ----------------------------------------------------------------------------
+# Help
+# ----------------------------------------------------------------------------
+usage() {
+    cat <<EOF
+${c_grn}rom-cli${c_reset} $VERSION — legal ROM / homebrew downloader (Internet Archive)
+
+${c_yel}USAGE${c_reset}
+    rom-cli [options] [search query]
+
+${c_yel}OPTIONS${c_reset}
+    -d, --download-dir DIR   download target (default: $ROM_CLI_DOWNLOAD_DIR)
+    -c, --collection LIST    semicolon-separated IA collections to search
+                             (default: $ROM_CLI_COLLECTIONS)
+    -n, --results N          number of search results (default: $ROM_CLI_RESULTS)
+    -x, --connections N      parallel connections per download (default: $ROM_CLI_CONNECTIONS)
+    -V, --version            print version
+    -h, --help               show this help
+
+${c_yel}EXAMPLES${c_reset}
+    rom-cli                       # interactive: prompt for a search term
+    rom-cli homebrew snes         # search directly
+    rom-cli -c opensource_media doom
+
+${c_yel}ENVIRONMENT${c_reset}
+    ROM_CLI_DOWNLOAD_DIR, ROM_CLI_COLLECTIONS, ROM_CLI_RESULTS, ROM_CLI_CONNECTIONS
+
+${c_dim}rom-cli only uses the public Internet Archive API and is intended for
+legal, freely-distributable content (homebrew, public domain, openly licensed).${c_reset}
+EOF
+}
+
+# ----------------------------------------------------------------------------
+# Search: query the IA advancedsearch API, restricted to legal collections.
+# ----------------------------------------------------------------------------
+search_archive() {
+    local query="$1"
+    # Build a collection filter: (collection:a OR collection:b ...)
+    local coll_filter="" IFS=';'
+    read -ra colls <<< "$ROM_CLI_COLLECTIONS"
+    for col in "${colls[@]}"; do
+        [[ -n "$col" ]] || continue
+        coll_filter+="${coll_filter:+ OR }collection:${col}"
+    done
+    unset IFS
+
+    local q="(${query}) AND (${coll_filter})"
+
+    curl -fsSL -G "$IA_ADVANCED" \
+        --data-urlencode "q=${q}" \
+        --data-urlencode "fl[]=identifier" \
+        --data-urlencode "fl[]=title" \
+        --data-urlencode "fl[]=year" \
+        --data-urlencode "fl[]=mediatype" \
+        --data-urlencode "rows=${ROM_CLI_RESULTS}" \
+        --data-urlencode "page=1" \
+        --data-urlencode "output=json" \
+        2>/dev/null
+}
+
+# ----------------------------------------------------------------------------
+# Pick a result via fzf
+# ----------------------------------------------------------------------------
+pick_item() {
+    local json="$1"
+    local count
+    count=$(jq -r '.response.numFound // 0' <<<"$json")
+    [[ "$count" -gt 0 ]] || return 1
+
+    # tab-separated: identifier \t pretty label
+    jq -r '.response.docs[]
+            | [.identifier,
+               ((.title // .identifier) + "  (" + (.year // "n/a" | tostring) + ")  [" + (.mediatype // "?") + "]")]
+            | @tsv' <<<"$json" \
+    | fzf --with-nls \
+          --delimiter='\t' \
+          --with-nth=2 \
+          --prompt='rom > ' \
+          --height=80% \
+          --border \
+          --header="$count results — enter to select, esc to cancel" \
+    | cut -f1
+}
+
+# ----------------------------------------------------------------------------
+# List downloadable files within an IA item, let the user pick which.
+# ----------------------------------------------------------------------------
+pick_files() {
+    local identifier="$1"
+    local meta
+    meta=$(curl -fsSL "${IA_META}/${identifier}") || die "could not fetch metadata for $identifier"
+
+    # Filter out IA's own metadata/derivative files; keep real content.
+    jq -r '.files[]
+            | select(.name | test("(_meta\\.xml|_files\\.xml|_meta\\.sqlite|__ia_thumb|\\.sqlite|_archive\\.torrent|reviews\\.xml|_itemimage\\.|spectrogram)") | not)
+            | [.name, ((.size // "0") | tonumber)]
+            | @tsv' <<<"$meta" \
+    | awk -F'\t' '{
+        s=$2; u="B";
+        if (s>=1073741824){s=s/1073741824;u="GB"}
+        else if (s>=1048576){s=s/1048576;u="MB"}
+        else if (s>=1024){s=s/1024;u="KB"}
+        printf "%s\t%s  (%.1f %s)\n", $1, $1, s, u
+      }' \
+    | fzf --multi \
+          --delimiter='\t' \
+          --with-nth=2 \
+          --prompt='file > ' \
+          --height=80% \
+          --border \
+          --header="TAB to multi-select files, enter to download" \
+    | cut -f1
+}
+
+# ----------------------------------------------------------------------------
+# Download chosen files with aria2
+# ----------------------------------------------------------------------------
+download_files() {
+    local identifier="$1"; shift
+    local -a files=("$@")
+    local dest="${ROM_CLI_DOWNLOAD_DIR}/${identifier}"
+    mkdir -p "$dest"
+
+    for f in "${files[@]}"; do
+        [[ -n "$f" ]] || continue
+        local url="${IA_DL}/${identifier}/${f}"
+        msg "downloading: $f"
+        aria2c \
+            --dir="$dest" \
+            --out="$f" \
+            --max-connection-per-server="$ROM_CLI_CONNECTIONS" \
+            --split="$ROM_CLI_CONNECTIONS" \
+            --continue=true \
+            --auto-file-renaming=false \
+            --summary-interval=0 \
+            --console-log-level=warn \
+            "$url" || warn "failed: $f"
+    done
+    msg "done → $dest"
+}
+
+# ----------------------------------------------------------------------------
+# Main
+# ----------------------------------------------------------------------------
+main() {
+    local query=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -d|--download-dir) ROM_CLI_DOWNLOAD_DIR="$2"; shift 2;;
+            -c|--collection)   ROM_CLI_COLLECTIONS="$2"; shift 2;;
+            -n|--results)      ROM_CLI_RESULTS="$2"; shift 2;;
+            -x|--connections)  ROM_CLI_CONNECTIONS="$2"; shift 2;;
+            -V|--version)      echo "rom-cli $VERSION"; exit 0;;
+            -h|--help)         usage; exit 0;;
+            --) shift; query="$*"; break;;
+            -*) die "unknown option: $1";;
+            *)  query="${query:+$query }$1"; shift;;
+        esac
+    done
+
+    check_deps
+
+    if [[ -z "$query" ]]; then
+        read -rp "$(printf '%s::%s search: ' "$c_blu" "$c_reset")" query
+        [[ -n "$query" ]] || die "no search query"
+    fi
+
+    info "searching Internet Archive for: $query"
+    local results
+    results=$(search_archive "$query") || die "search failed"
+
+    local id
+    id=$(pick_item "$results") || die "no results found (try a broader query or a different -c collection)"
+    [[ -n "$id" ]] || { warn "cancelled"; exit 0; }
+
+    info "selected: $id"
+    local chosen
+    mapfile -t chosen < <(pick_files "$id")
+    ((${#chosen[@]})) || { warn "no files selected"; exit 0; }
+
+    download_files "$id" "${chosen[@]}"
+}
+
+main "$@"
