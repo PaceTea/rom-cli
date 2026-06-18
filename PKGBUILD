@@ -1,6 +1,6 @@
 # Maintainer: PaceTea <dimip.2006@gmail.com>
 pkgname=rom-cli
-pkgver=1.1.0
+pkgver=1.1.1
 pkgrel=1
 pkgdesc="Browse and download legal ROMs, homebrew and public-domain games from the Internet Archive (ani-cli style)"
 arch=('any')

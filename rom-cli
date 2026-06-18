@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-VERSION="1.1.0"
+VERSION="1.1.1"
 
 # ----------------------------------------------------------------------------
 # Config
@@ -135,8 +135,7 @@ pick_item() {
             | [.identifier,
                ((.title // .identifier) + "  (" + (.year // "n/a" | tostring) + ")  [" + (.mediatype // "?") + "]")]
             | @tsv' <<<"$json" \
-    | fzf --with-nls \
-          --delimiter='\t' \
+    | fzf --delimiter='\t' \
           --with-nth=2 \
           --prompt='rom > ' \
           --height=80% \
