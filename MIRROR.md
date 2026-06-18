@@ -37,7 +37,7 @@ roms/
 Set it permanently in your shell so you don't have to type `-m` each time:
 
 ```bash
-echo 'export ROM_CLI_MIRROR="http://192.168.178.50/roms"' >> ~/.bashrc
+echo 'export ROM_CLI_MIRROR="https://example.com/roms"' >> ~/.bashrc
 ```
 
 Then just:
@@ -77,21 +77,21 @@ curl -s http://localhost/roms/ | grep href
 Then from your Steam Deck / PC:
 
 ```bash
-rom-cli -m http://<server-ip>/roms zelda
+rom-cli -m https://example.com/roms zelda
 ```
 
 ---
 
-## Option B — your existing FileBrowser (Sheska)
+## Option B — an existing FileBrowser instance
 
-You already run FileBrowser on Sheska (`192.168.178.50:8080`) with `/opt/sheska/data` mounted at `/srv`. Two ways to use it:
+If you already run [FileBrowser](https://github.com/gtsteffaniak/filebrowser) (e.g. on `example.com` with a data directory mounted at `/srv`), there are two ways to use it:
 
-**B1 — drop a folder in and serve via FileBrowser's raw path**
+**B1 — serve via FileBrowser's raw path**
 
-Put your dumps under `/opt/sheska/data/roms` on the host. FileBrowser exposes file content under a raw API path; point `rom-cli` at the directory:
+Put your dumps under the served data directory (e.g. `.../data/roms`). FileBrowser exposes file content under a raw API path; point `rom-cli` at the directory:
 
 ```bash
-rom-cli -m http://192.168.178.50:8080/api/raw/roms
+rom-cli -m https://example.com/api/raw/roms
 ```
 
 > The exact raw path depends on your FileBrowser version and whether the share needs auth. If listing returns nothing, the index may be JSON rather than an HTML `href` index — in that case use Option A (a tiny nginx autoindex next to FileBrowser is the most reliable), or a "create share" link.
@@ -128,7 +128,7 @@ Your connection is DS-Lite / CGNAT, so classic port-forwarding won't work. Use t
 - **Tailscale** — install on the server and the Steam Deck, then use the server's Tailscale IP as the mirror base (`rom-cli -m http://100.x.y.z/roms`). This is the clean, always-on option for your own devices.
 - **Cloudflare Tunnel** — if you finish the named tunnel + `.tech` domain you were setting up, point `rom-cli` at `https://roms.yourdomain.tech`.
 
-On the LAN itself, just use the `192.168.178.x` address directly — no tunnel needed.
+On the LAN itself, just use the the LAN address directly — no tunnel needed.
 
 ---
 

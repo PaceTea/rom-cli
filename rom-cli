@@ -81,7 +81,7 @@ ${c_yel}EXAMPLES${c_reset}
     rom-cli                       # interactive: prompt for a search term
     rom-cli homebrew snes         # search directly
     rom-cli -c opensource_media doom
-    rom-cli -m http://192.168.178.50:8080/api/raw/roms   # browse your mirror
+    rom-cli -m https://example.com/api/raw/roms   # browse your mirror
     rom-cli --mirror http://my-server/roms zelda         # filter your mirror
 
 ${c_yel}ENVIRONMENT${c_reset}

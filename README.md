@@ -74,7 +74,7 @@ All options have matching env vars: `ROM_CLI_DOWNLOAD_DIR`, `ROM_CLI_COLLECTIONS
 `rom-cli` can also browse **your own HTTP file server** instead of the Internet Archive — handy for pulling your personal dumps of games you own onto a Steam Deck or handheld without USB shuffling:
 
 ```bash
-rom-cli -m http://192.168.178.50/roms zelda
+rom-cli -m https://example.com/roms zelda
 ```
 
 See [MIRROR.md](MIRROR.md) for full setup (nginx autoindex, FileBrowser, Tailscale/Cloudflare for remote access).
