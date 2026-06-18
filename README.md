@@ -34,7 +34,7 @@ sudo pacman -S curl jq fzf aria2
 ### From the AUR-style PKGBUILD
 
 ```bash
-git clone https://github.com/YOURUSER/rom-cli.git
+git clone https://github.com/PaceTea/rom-cli.git
 cd rom-cli
 makepkg -si
 ```
@@ -68,6 +68,16 @@ rom-cli --help
 ### Environment variables
 
 All options have matching env vars: `ROM_CLI_DOWNLOAD_DIR`, `ROM_CLI_COLLECTIONS`, `ROM_CLI_RESULTS`, `ROM_CLI_CONNECTIONS`.
+
+## Self-hosted mirror
+
+`rom-cli` can also browse **your own HTTP file server** instead of the Internet Archive — handy for pulling your personal dumps of games you own onto a Steam Deck or handheld without USB shuffling:
+
+```bash
+rom-cli -m http://192.168.178.50/roms zelda
+```
+
+See [MIRROR.md](MIRROR.md) for full setup (nginx autoindex, FileBrowser, Tailscale/Cloudflare for remote access).
 
 ## Finding collections
 
